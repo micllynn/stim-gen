@@ -55,11 +55,13 @@ class Stim(object):
         dt              -- size of the time step in ms.
         command         -- 2D array containing stimuli; time across rows, sweeps across cols.
         time            -- time support vector.
+        stim_params     -- object containing attributes for each stim parameter for the current stim_type.
     
     
     Methods:
         
-        generate_PS         -- generate a synaptic current/potential-like waveform.
+        generate_PS         -- generate a synaptic current/potential-like waveform, with total amplitude defined
+        generate_PS_bycharge-- generates a synaptic current/potential-like waveform, with total charge defined
         generate_OU         -- generate Ornstein-Uhlenbeck noise.
         set_replicates      -- set the number of replicates of the stimulus.
         plot                -- plot the stimulus.
