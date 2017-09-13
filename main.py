@@ -34,6 +34,7 @@ Example usage:
 #%% IMPORT PREREQUISITE MODULES
 
 import numpy as np
+import types
 import numba as nb
 import matplotlib.pyplot as plt
 
@@ -97,6 +98,7 @@ class Stim(object):
         
         self.command    = None      # Attribute to hold the command (only current is currently supported).
         self.time       = None      # Attribute to hold a time support vector.
+        self.stim_params = None     # Attribute to hold stim parameters for given stim_type
         
     
     # Method for unambiguous representation of Stim instance.
@@ -109,7 +111,7 @@ class Stim(object):
             time_range  = str(self.time)
             command_str   = str(self.command)
         
-        return 'Stim object\n\nLabel: ' + self.label + '\nStim type: ' + self.stim_type + '\nTime range (ms): ' + time_range + '\nTime step (ms):' + str(self.dt) + '\nCommand:\n' + command_str 
+        return 'Stim object\n\nLabel: ' + self.label + '\nStim type: ' + self.stim_type + '\nTime range (ms): ' + time_range + '\nTime step (ms):' + str(self.dt) + '\nStim Parameters' + vars(self.stim_params) + '\nCommand:\n' + command_str
     
     
     # Pretty print self.command and some important details.
@@ -121,18 +123,23 @@ class Stim(object):
         # Include more details about the object if it isn't empty.
         if not self.command is None:
             header += ' with ' + str( self.command.shape[1] ) + ' sweeps of ' + str( ( self.time[-1] + self.dt ) / 1000 ) + 's each.\n\n'
+            footer = 'Stim parameters are: '
+            for key, value in vars(self.stim_params).items():
+                footer += '\n\t' + str(key) + ': ' + str(value)
+            footer += '\n\n'
             content = np.array2string(self.command)
         
         else:
             content = ''
+            footer = ''
         
-        return str(self.label) + '\n\n' + header + content
+        return str(self.label) + '\n\n' + header + footer + content
             
     
     
     ### MAIN METHODS
     
-    # Generate a synaptic current-like waveform.
+    # Generate a synaptic current-like waveform with defined amplitude
     def generate_PS(self, duration, ampli, tau_rise, tau_decay):
         
         """
@@ -141,10 +148,10 @@ class Stim(object):
         Note that the rise and decay time constants are only good approximations of fitted rise/decay taus (which are more experimentally relevant) if the provided values are separated by at least approx. half an order of magnitude.
         
         Inputs:
-            duration        -- length of the simulated waveform in ms ^ -1.
-            ampli           -- peak height of the waveform.
-            tau_rise        -- time constant of the rising phase of the waveform in ms ^ -1.
-            tau_decay       -- time constant of the falling phase of the waveform in ms ^ -1.
+            duration          -- length of the simulated waveform in ms ^ -1.
+            ampli             -- peak height of the waveform.
+            tau_rise          -- time constant of the rising phase of the waveform in ms ^ -1.
+            tau_decay         -- time constant of the falling phase of the waveform in ms ^ -1.
         """
         
         # Initialize time support vector.
@@ -152,7 +159,7 @@ class Stim(object):
         self.time = np.arange(0, duration, self.dt)
         
         # Generate waveform based on time constants then normalize amplitude.
-        waveform = np.abs( np.exp( -self.time / tau_rise ) - np.exp( -self.time / tau_decay ) )
+        waveform = np.exp( -self.time / tau_decay ) - np.exp( -self.time / tau_rise )
         waveform /= np.max(waveform)
         waveform *= ampli
         
@@ -160,10 +167,58 @@ class Stim(object):
         waveform = np.concatenate( ( np.zeros( (int( offset / self.dt)) ), waveform ), axis = 0 )
         waveform = waveform[np.newaxis].T
         
+        # Compute total charge transfer using the equation AUC = ampli * (tau_decay - tau_rise). (Derived from integrating PS equation from 0 to inf)
+        charge = ampli * (tau_decay - tau_rise)
+        
         # Assign output.
         self.time = np.arange(0, duration + offset, self.dt)
         self.command    = waveform
         self.stim_type  = "Post-synaptic current-like"
+        self.stim_params = types.SimpleNamespace(tau_rise = tau_rise, tau_decay = tau_decay, ampli = ampli, charge = charge)
+        
+
+    # Generate a synaptic current-like waveform with defined area under curve (total charge transfer)
+    def generate_PS_bycharge(self, duration, charge, tau_rise, tau_decay):
+        
+        """
+        Generate a post-synaptic potential/current-like waveform.
+        
+        Note that the rise and decay time constants are only good approximations of fitted rise/decay taus (which are more experimentally relevant) if the provided values are separated by at least approx. half an order of magnitude.
+        
+        Inputs:
+            duration          -- length of the simulated waveform in ms ^ -1.
+            charge            -- total charge transfer in units of pA*ms
+            tau_rise          -- time constant of the rising phase of the waveform in ms ^ -1.
+            tau_decay         -- time constant of the falling phase of the waveform in ms ^ -1.
+        """
+        
+        # Initialize time support vector.
+        offset = 500
+        self.time = np.arange(0, duration, self.dt)
+        
+        # Generate waveform based on time constants
+        waveform = np.exp( -self.time / tau_decay ) - np.exp( -self.time / tau_rise )
+        
+        # Calculate ratio between desired and current charge and use to normalize waveform
+        curr_charge = tau_decay - tau_rise
+        scalefactor_waveform = charge / curr_charge
+        waveform *= scalefactor_waveform
+        
+        # Convert waveform into a column vector.
+        waveform = np.concatenate( ( np.zeros( (int( offset / self.dt)) ), waveform ), axis = 0 )
+        waveform = waveform[np.newaxis].T
+        
+        # Compute amplitude of PS based on charge sign       
+        if charge > 0:
+            ampli = np.max(waveform)
+        else:
+            ampli = np.min(waveform)
+        
+        # Assign output.
+        self.time = np.arange(0, duration + offset, self.dt)
+        self.command    = waveform
+        self.stim_type  = "Post-synaptic current-like"
+        self.stim_params = types.SimpleNamespace(tau_rise = tau_rise, tau_decay = tau_decay, ampli = ampli, charge = charge)
     
     
     # Realize OU noise and assign to self.command. (Wrapper for _gen_OU_internal.)
@@ -225,6 +280,7 @@ class Stim(object):
         # Assign output.
         self.command    = noise
         self.stim_type  = 'Ornstein-Uhlenbeck noise'
+        self.stim_params = types.SimpleNamespace(I0 = I0, tau = tau, sigma0 = sigma0, dsigma = dsigma, sin_per = sin_per, bias_factor = bias_factor, bias_point = bias_point)
         
     
     # Generate sinusoidal input
@@ -277,6 +333,7 @@ class Stim(object):
         # Assign output.
         self.command    = sinewave
         self.stim_type  = 'Sine wave'
+        self.stim_params = types.SimpleNamespace(I0 = I0, ampli = ampli, period = period)
         
     
     # Set number of replicates of the command array.
@@ -294,6 +351,7 @@ class Stim(object):
         
         # Create replicates by tiling.
         self.command = np.tile(self.command, (1, reps))
+        self.stim_params.array_replicates = reps
     
     
     # Plot command, time, and additional data.
@@ -379,9 +437,8 @@ class Stim(object):
             f.write(header)
             f.write(content)
             f.close()
-    
-    
-    
+
+
     ### HIDDEN METHODS
     
     # Fast internal method to realize OU noise. (Called by generate_OU.)
