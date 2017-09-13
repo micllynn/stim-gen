@@ -355,7 +355,7 @@ class Stim(object):
         
         fname = self.label + '.ATF'
         header = ''.join(['ATF1.0\n1\t{0}\nType=1\nTime (ms)\t'.format(self.command.shape[1]),
-                          *['Current (pA)\t' for sweep in range(self.command.shape[1])], '\n'])
+                          *['Command (AU)\t' for sweep in range(self.command.shape[1])], '\n'])
         
         # Convert numeric arrays to strings.
         str_command     = self.command.astype( np.unicode_ )
