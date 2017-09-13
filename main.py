@@ -36,6 +36,7 @@ Example usage:
 import numpy as np
 import numba as nb
 import matplotlib.pyplot as plt
+from neo import AxonIO
 
 
 
@@ -278,6 +279,56 @@ class Stim(object):
         self.command    = sinewave
         self.stim_type  = 'Sine wave'
         
+    
+    # Generate a stim from an ABF file.
+    def from_ABF(self, fname, channel, average = True):
+        
+        """
+        Read in an ABF file and create a stim from one of its channels.
+        
+        Inputs:
+            fname           -- name of the ABF file to be read.
+            channel         -- integer identifying the channel to use.
+            average         -- use a mean of all sweeps to create the stim.
+        """
+        
+        try:
+            assert type(channel) is int
+        except AssertionError:
+            raise TypeError('Expected channel to be int, got {} instead.'.format(type(channel)))
+        
+        # Add an extension to fname if one was not provided.
+        if fname[-4:].upper() != '.ABF':
+            fname += '.ABF'
+        
+        # Read the sweeps from the file.
+        rec = AxonIO(fname).read()[0].segments
+            
+        # Reassign self.dt if dt from read file differs.
+        rec_dt = 1000 / float( rec[0].analogsignals[channel].sampling_rate )
+        if ( np.abs(rec_dt - self.dt) / self.dt ) > 0.001: # Check for 0.1% difference (due to noise associated with floats).
+            
+            print('Stim dt {}ms and recording dt {}ms differ; overwriting Stim dt.'.format(self.dt, rec_dt))
+            self.dt = rec_dt
+        
+        # Initialize an array to hold the sweeps.
+        stim_array = np.empty((len(rec[0].analogsignals[channel]), len(rec)),
+                              dtype = np.float64)
+        
+        # Insert the sweeps from the designated channel into the array.
+        for sweep_no in range( len(rec) ):
+            stim_array[:, sweep_no] = rec[sweep_no].analogsignals[channel].squeeze()
+        
+        # Optionally, average sweeps to create stim.
+        if average is True:
+            stim_array = stim_array.mean(axis = 1)
+            stim_array = stim_array[np.newaxis].T # Conserve ndims.
+        
+        # Assign output.
+        self.time       = np.arange(0, stim_array.shape[0] * self.dt, self.dt)
+        self.command    = stim_array
+        self.stim_type  = 'Recorded'
+    
     
     # Set number of replicates of the command array.
     def set_replicates(self, reps):
